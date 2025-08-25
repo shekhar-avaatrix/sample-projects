@@ -1,0 +1,57 @@
+pip install -U langchain langchain-openai
+# env vars:
+#   AZURE_OPENAI_API_KEY=...
+#   AZURE_OPENAI_ENDPOINT=https://<your-resource>.openai.azure.com/
+#   AZURE_OPENAI_DEPLOYMENT=gpt-5-mini   # your *deployment name* in Azure
+
+
+
+import os
+from langchain_openai import AzureChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.chat_history import InMemoryChatMessageHistory
+
+# 1) LLM (Azure OpenAI via langchain-openai)
+llm = AzureChatOpenAI(
+    azure_deployment=os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5-mini"),
+    api_version="2024-10-21",   # Azure OpenAI latest GA API
+    temperature=0.2,
+)
+
+# 2) Prompt with a history slot
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a concise, helpful assistant."),
+    MessagesPlaceholder("history"),
+    ("human", "{input}"),
+])
+
+chain = prompt | llm
+
+# 3) Wire up chat history
+store: dict[str, InMemoryChatMessageHistory] = {}
+
+def get_session_history(session_id: str) -> InMemoryChatMessageHistory:
+    if session_id not in store:
+        store[session_id] = InMemoryChatMessageHistory()
+    return store[session_id]
+
+with_history = RunnableWithMessageHistory(
+    chain,
+    get_session_history,
+    input_messages_key="input",
+    history_messages_key="history",
+)
+
+# 4) Example conversation (same session_id keeps context)
+session_cfg = {"configurable": {"session_id": "user-123"}}
+
+print(
+    with_history.invoke({"input": "Summarize LangChain message history in 2 lines."},
+                        config=session_cfg).content
+)
+
+print(
+    with_history.invoke({"input": "Great—now give me a 1-sentence TL;DR."},
+                        config=session_cfg).content
+)
